@@ -1,0 +1,83 @@
+#!/bin/sh
+set -e -u
+
+readonly binfile=bench.bin
+
+if [ $# -lt 1 ]
+then
+	echo
+	echo "Missing argument!" >&2
+	echo >&2
+	echo "At least one test name must be given." >&2
+	echo >&2
+	echo "If a variable RUN_COUNT is set, it will override the default" >&2
+	echo "run count of the benchmark." >&2
+	exit 1
+fi
+
+for benchmark in "$@"
+do
+	case $benchmark in
+		*.c) ;;
+		*.m) ;;
+		*)
+			echo "Unsupported file format: $benchmark" >&2
+			exit 1
+	esac
+done
+
+
+case $0 in
+	/*) baseDir="$( dirname "$0" )" ;;
+	*) baseDir="$( pwd )/$( dirname "$0" )"
+esac
+
+
+tmpdir=$( mktemp -d )
+readonly tmpdir
+trap 'rm -rf "$tmpdir"' EXIT
+
+(
+	# As we are in a subshell, the working directory is
+	# restored once the subshell exits
+	cd "$tmpdir"
+
+	for benchmark in "$@"
+	do
+		echo
+		echo "=== Bechmarking $benchmark ===="
+
+		# shellcheck disable=2034
+		bpath="$baseDir/benchmarks/$benchmark"
+
+		for opt in 0 1 2 3 s
+		do
+			build="clang \"\$bpath\" -O$opt -o \"\$binfile\""
+
+			case $benchmark in
+				*.c) ;;
+
+				*.m)
+					build="$build -fobjc-arc -fmodules"
+				;;
+
+				*) exit 1
+			esac
+
+			eval "$build"
+
+			echo
+			echo "--- Optimization O$opt ---"
+			if [ -z "${RUN_COUNT-}" ]
+			then
+				"./$binfile" || true
+			else
+				"./$binfile" "${RUN_COUNT-}" || true
+			fi
+			rm "$binfile"
+			[ -f "default.profraw" ] &&  rm "default.profraw"
+		done
+
+		echo
+	done
+)
